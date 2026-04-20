@@ -72,18 +72,15 @@ export class ChatAgent extends AIChatAgent<Env> {
     const workersai = createWorkersAI({ binding: this.env.AI });
 
     const result = streamText({
-      model: workersai("@cf/moonshotai/kimi-k2.5", {
+      model: workersai("@cf/google/gemma-4-26b-a4b-it", {
         sessionAffinity: this.sessionAffinity
       }),
-      system: `You are a helpful assistant. You can check the weather, get the user's timezone, run calculations, and schedule tasks. 
+      system: `You are a helpful and talkative assistant. You can check the weather, get the user's timezone, run calculations, schedule tasks, and check stock portfolios on Trading 212. 
       Do not explain your reasoning. 
       Do not narrate the chat history or acknowledge previous messages.
-      If the user's latest message requries a tool, execute the tool immediately without any introductory text.
       When the user asks to schedule a task or reminder, use the scheduleReminder tool.
-      Do not call the scheduleReminder tool multiple times for items belonging to the same event. Group related items into an array and a single tool call, this array should be passed into 'shopping_list'.
-      If the user provides a list of things, summarize the overarching event in the 'summary' and 'discord_message' parameters.
-      Ensure the tool call includes: 'type' (reminder or question), 'summary', 'timestamp' (ISO 8601 format, or null), 'is_important' (boolean), 'discord_message' (a useful message), and 'shopping_list' (array of strings, if applicable).
-      CRITICAL RULE FOR HISTORY: You are reading a chat transcript. Fulfill only the request in the final, most recent user message. Do not re-execute tools, math equations, or tasks requested in previous messages, as they have already been completed.
+      Do not call the scheduleReminder tool multiple times for items belonging to the same event. Group related items into an array and a single tool call, this array should be passed into 'shopping_list'. Do not use characters like '<|"|' in the array.
+      The chat history should only be used for context. Any tool calls have already happened and should not be repeated. Only call tools for the most recent message.
 
 ${getSchedulePrompt({ date: new Date() })}
 
@@ -96,6 +93,106 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
       tools: {
         // MCP tools from connected servers
         ...mcpTools,
+
+        // check a t212 stocks and shares isa portfolio
+        analyzePortfolio: tool({
+          description: 'Fetches the users live Trading 212 portfolio, calculates their combined dividend yield, and returns the sanitized data.',
+          inputSchema: z.object({}),
+          execute: async () => {
+            console.log("AI fetching live t212 data...");
+
+            try {
+              // 1. Fetch EUR/GBP Exchange Rate
+              let eurGbpRate = 0.85; // Fallback
+              try {
+                const fxRes = await fetch("https://api.exchangerate-api.com/v4/latest/EUR");
+                if (fxRes.ok) {
+                  const fxData = (await fxRes.json()) as { rates: { GBP: number } };
+                  eurGbpRate = fxData.rates.GBP;
+                }
+              } catch (e) {
+                console.warn("Using fallback EUR/GBP rate.");
+              }
+
+              // 2. Fetch T212 Portfolio
+              // Note: Python's auth=(key, secret) compiles to a Basic Auth header
+              const authString = btoa(`${this.env.T212_API_KEY}:${this.env.T212_API_SECRET}`);
+              const t212Res = await fetch("https://live.trading212.com/api/v0/equity/portfolio", {
+                headers: { "Authorization": `Basic ${authString}` }
+              });
+
+              if (!t212Res.ok) throw new Error(`T212 API Error: ${t212Res.statusText}`);
+              const data: any[] = await t212Res.json();
+
+              // 3. Map and Sanitize Data
+              const tickerMap: Record<string, { name: string, currency: string }> = {
+                "VHYLl_EQ": { name: "VHYL", currency: "GBP" },
+                "BNPp_EQ":  { name: "BNP",  currency: "EUR" },
+                "CABKe_EQ": { name: "CABK", currency: "EUR" },
+                "ENGIp_EQ": { name: "ENGI", currency: "EUR" },
+                "HSBAl_EQ": { name: "HSBA", currency: "GBX" },
+                "IBEe_EQ":  { name: "IBE",  currency: "EUR" },
+                "INGAa_EQ": { name: "INGA", currency: "EUR" },
+                "IESd_EQ":  { name: "ISP",  currency: "EUR" }, 
+                "LGENl_EQ": { name: "LGEN", currency: "GBX" },
+                "LLOYl_EQ": { name: "LLOY", currency: "GBX" },
+                "NGl_EQ":   { name: "NG.",  currency: "GBX" },
+                "RBSl_EQ":  { name: "NWG",  currency: "GBX" }, 
+                "PNNl_EQ":  { name: "PNN",  currency: "GBX" },
+                "UUl_EQ":   { name: "UU.",  currency: "GBX" }
+              };
+
+              const sanitizedPortfolio: Record<string, number> = {};
+              let totalPortfolioValue = 0.0;
+
+              for (const position of data) {
+                const rawTicker = position.ticker;
+                if (!tickerMap[rawTicker]) continue;
+
+                const clean = tickerMap[rawTicker];
+                const quantity = position.quantity || 0;
+                const currentPrice = position.currentPrice || 0;
+                const rawValue = quantity * currentPrice;
+
+                let gbpValue = rawValue;
+                if (clean.currency === "GBX") gbpValue = rawValue / 100;
+                if (clean.currency === "EUR") gbpValue = rawValue * eurGbpRate;
+
+                sanitizedPortfolio[clean.name] = Number(gbpValue.toFixed(2));
+                totalPortfolioValue += gbpValue;
+              }
+
+              // 4. Calculate Weighted Yield
+              const yieldMap: Record<string, number> = {
+                "VHYL": 0.0324, "BNP":  0.0816, "CABK": 0.0469,
+                "ENGI": 0.0523, "HSBA": 0.0416, "IBE":  0.0336,
+                "INGA": 0.0768, "ISP":  0.0622, "LGEN": 0.0802,
+                "LLOY": 0.0355, "NG.":  0.0367, "NWG":  0.0527,
+                "PNN":  0.0701, "UU.":  0.0387
+              };
+
+              let weightedYield = 0.0;
+              if (totalPortfolioValue > 0) {
+                for (const [ticker, gbpValue] of Object.entries(sanitizedPortfolio)) {
+                  const weight = gbpValue / totalPortfolioValue;
+                  const stockYield = yieldMap[ticker] || 0.0;
+                  weightedYield += (weight * stockYield);
+                }
+              }
+
+              const finalYield = Number((weightedYield * 100).toFixed(2));
+              const finalTotal = Number(totalPortfolioValue.toFixed(2));
+
+              // 5. Return context to the AI
+              return `Success! Portfolio Total: £${finalTotal}. Combined Dividend Yield: ${finalYield}%. 
+              Breakdown: ${JSON.stringify(sanitizedPortfolio)}`;
+
+            } catch (error) {
+              console.error("Portfolio fetch failed:", error);
+              return "Error: Could not fetch portfolio data. Check API keys.";
+            }
+          }
+        }),
 
         // schedule a new discord message
         scheduleReminder: tool({
@@ -111,6 +208,7 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
             console.log(`AI called the scheduling tool for ${summary} at ${timestamp}.`);
 
             try {
+              // @ts-ignore
               await this.env.REMINDER_WORKFLOW.create({
                 params: {
                   type: "reminder",
@@ -265,16 +363,17 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
   }
 }
 
-async function sendToDiscord(message: string) {
-  // #region Discord webhook
-  const webhookURL = "REPLACE WITH YOUR ACTUAL WEBHOOK LINK";
 
-  await fetch(webhookURL, {
+async function sendToDiscord(message: string, webhookUrl: string) {
+  // #region Discord webhook
+
+  await fetch(webhookUrl, {
     method: "POST",
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({content: message})
   });
 }
+
 
 export class ReminderWorkflow extends WorkflowEntrypoint<any, any> {
   async run(event: WorkflowEvent<any>, step: WorkflowStep) {
@@ -298,7 +397,7 @@ export class ReminderWorkflow extends WorkflowEntrypoint<any, any> {
         console.log(finalMessage);
       }
 
-      await sendToDiscord(finalMessage);
+      await sendToDiscord(finalMessage, this.env.DISCORD_WEBHOOK_URL);
     })
   }
 }
