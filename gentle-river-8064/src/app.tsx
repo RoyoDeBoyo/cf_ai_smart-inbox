@@ -110,6 +110,33 @@ function ToolPartView({
 
   // Completed
   if (part.state === "output-available") {
+    
+    // --- THE UI OVERRIDE ---
+    // If it's our master recipe list, render it as standard Markdown!
+    if (toolName === "getCompleteRecipeList") {
+      // Ensure we just have the raw string, dropping the escaped JSON quotes
+      const rawMarkdown = typeof part.output === "string" 
+        ? part.output 
+        : JSON.stringify(part.output).replace(/^"|"$/g, '').replace(/\\n/g, '\n');
+
+      return (
+        <div className="flex justify-start my-2 w-full">
+          <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-kumo-base text-kumo-default leading-relaxed border border-kumo-line p-4 shadow-sm">
+            <Streamdown
+              className="sd-theme"
+              plugins={{ code }}
+              controls={false}
+              isAnimating={false}
+            >
+              {rawMarkdown}
+            </Streamdown>
+          </div>
+        </div>
+      );
+    }
+    // -----------------------
+
+    // For all OTHER tools, keep the normal grey box
     return (
       <div className="flex justify-start">
         <Surface className="max-w-[85%] px-4 py-2.5 rounded-xl ring ring-kumo-line">

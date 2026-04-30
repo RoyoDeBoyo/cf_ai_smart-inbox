@@ -41,14 +41,7 @@
 	"observability": {
 		"enabled": true
 	},
-	"upload_source_maps": true,
-	"workflows": [
-		{
-			"name": "reminder-workflow",
-			"binding": "REMINDER_WORKFLOW",
-			"class_name": "ReminderWorkflow"
-		}
-	]
+	"upload_source_maps": true
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
