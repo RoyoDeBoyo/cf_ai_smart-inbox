@@ -1,4 +1,5 @@
 {
+  //@ts-ignore
   "extends": "agents/tsconfig",
   "compilerOptions": {
     // add your overrides here

@@ -18,9 +18,9 @@ import { sendDiscordReminder } from "./tools/discord";
 import { listRemindersExec, cancelReminderExec, scheduleReminderExec } from "./tools/reminders";
 import { updateInventoryExec, checkInventoryExec } from "./tools/inventory";
 import { saveRecipeExec, getRecipeBankExec, getCompleteRecipeListExec, getRecipeInfoExec, getRecipeNamesExec } from "./tools/recipes";
-import { 
-  viewShoppingListExec, 
-  updateShoppingListExec, 
+import {
+  viewShoppingListExec,
+  updateShoppingListExec,
   sendShoppingListExec,
   suggestMealsByInventoryExec
 } from "./tools/shopping";
@@ -139,13 +139,13 @@ export class ChatAgent extends AIChatAgent<Env> {
         2. Use 'updateShoppingList' to add that item back onto the shopping list for next time.
 
       ${getSchedulePrompt({ date: new Date() })}`,
-      
+
       // Prune old tool calls to save tokens on long conversations
       messages: pruneMessages({
         messages: inlineDataUrls(await convertToModelMessages(this.messages)),
         toolCalls: "before-last-2-messages"
       }),
-      
+
       //@ts-ignore
       maxTokens: 1024,
       maxRetries: 2,
@@ -208,9 +208,9 @@ export class ChatAgent extends AIChatAgent<Env> {
         // Schedule a new discord message
         scheduleReminder: tool({
           description: "Schedule a Discord reminder.",
-          inputSchema: z.object({ 
-            summary: z.string(), timestamp: z.string(), 
-            discord_message: z.string(), shopping_list: z.string().optional() 
+          inputSchema: z.object({
+            summary: z.string(), timestamp: z.string(),
+            discord_message: z.string(), shopping_list: z.string().optional()
           }),
           execute: async (input) => await scheduleReminderExec(this, input)
         }),
@@ -257,8 +257,8 @@ export class ChatAgent extends AIChatAgent<Env> {
         // gets info about ONE recipe
         getRecipeInfo: tool({
           description: "Get full ingredients and instructions for a specific recipe by name.",
-          inputSchema: z.object({ 
-            name: z.string().describe("The exact name of the recipe to look up") 
+          inputSchema: z.object({
+            name: z.string().describe("The exact name of the recipe to look up")
           }),
           execute: async ({ name }) => await getRecipeInfoExec(this, name)
         }),
