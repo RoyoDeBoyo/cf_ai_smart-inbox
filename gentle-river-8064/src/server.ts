@@ -16,11 +16,20 @@ import { z } from "zod";
 import { fetchT212Portfolio } from "./tools/t212";
 import { sendDiscordReminder } from "./tools/discord";
 import { listRemindersExec, cancelReminderExec, scheduleReminderExec } from "./tools/reminders";
-import { updateInventoryExec, checkInventoryExec } from "./tools/inventory";
-import { saveRecipeExec, getRecipeBankExec, getCompleteRecipeListExec, getRecipeInfoExec, getRecipeNamesExec } from "./tools/recipes";
-import {
-  viewShoppingListExec,
-  updateShoppingListExec,
+import { checkInventoryExec } from "./tools/inventory";
+import { calculateSmartDepartureExec } from "./tools/maps";
+import { 
+  saveDataExec,
+  updateDataExec
+} from "./tools/storage";
+import {  
+  getRecipeBankExec, 
+  getCompleteRecipeListExec, 
+  getRecipeInfoExec, 
+  getRecipeNamesExec,
+} from "./tools/recipes";
+import { 
+  viewShoppingListExec, 
   sendShoppingListExec,
   suggestMealsByInventoryExec
 } from "./tools/shopping";
@@ -83,7 +92,19 @@ export class ChatAgent extends AIChatAgent<Env> {
         instructions TEXT,
         last_updated TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS saved_locations (
+        name TEXT PRIMARY KEY,
+        address TEXT NOT NULL
+      )
     `);
+
+    // Try to add the new column to existing tables (fails silently if it already exists)
+      try {
+        this.ctx.storage.sql.exec(`ALTER TABLE recipes ADD COLUMN meal_type TEXT DEFAULT 'dinner'`);
+      } catch (e) {
+        // Column already exists, ignore
+      }
 
     // Configure OAuth popup behavior for MCP servers that require authentication
     this.mcp.configureOAuthCallback({
@@ -120,7 +141,7 @@ export class ChatAgent extends AIChatAgent<Env> {
       model: workersai("@cf/google/gemma-4-26b-a4b-it", {
         sessionAffinity: this.sessionAffinity
       }),
-      system: `You are a helpful and talkative assistant. You can check the weather, run calculations, schedule reminders, check stocks, and act as a master meal planner.
+      system: `You are a helpful and talkative assistant. You can check the weather, run calculations, schedule reminders, check stocks, act as a master meal planner, and plan journeys.
       CRITICAL: You must call tools IMMEDIATELY. Do NOT output any "thinking", reasoning, or preliminary text before a tool call. Just output the tool call.
       
       MEAL PLANNING RULES:
@@ -131,12 +152,13 @@ export class ChatAgent extends AIChatAgent<Env> {
       - DYNAMIC TASTES: If the user says they are sick of a meal, bored of it, or didn't like it this time, use 'saveRecipe' to downgrade its rating to a 2 or 3. If they absolutely loved it, upgrade it to a 5.
       - If the user is lacking ingredients for a suggested meal, ask them if they want to add those missing items to a shopping list.
       - If they agree, use 'scheduleReminder' to schedule a Discord message with the missing ingredients in the 'shopping_list' array.
-      - SHOPPING LIST: You manage a persistent shopping list. Use 'updateShoppingList' to add/remove/clear items. 
       - If the user says they are "going shopping now", use 'sendShoppingList' to instantly dispatch the list to their Discord.
       - If they want to be *reminded* to go shopping at a later date/time, use 'viewShoppingList' to get the current items, and then put those items into a 'scheduleReminder' tool call.
       - POST-SHOPPING CORRECTIONS: When the user goes shopping, the system automatically adds all items to their inventory. If the user returns and says the store did NOT have an item (e.g., "they were out of carrots"), you must call TWO tools:
-        1. Use 'updateInventory' with a quantity of 0 to remove that item from their inventory.
-        2. Use 'updateShoppingList' to add that item back onto the shopping list for next time.
+      REMINDER RULES:
+        - If a user asks to set an "important" reminder for an event they must travel to, do NOT schedule the reminder immediately.
+        - FIRST, call 'calculateTravelTime' using their origin and destination.
+        - SECOND, read the tool's output, subtract the calculated advance minutes from their event time, and call 'scheduleReminder' for when they need to LEAVE the house. Make the reminder message urgent (e.g., "Leave now for your flight! Traffic takes X mins").
 
       ${getSchedulePrompt({ date: new Date() })}`,
 
@@ -153,6 +175,73 @@ export class ChatAgent extends AIChatAgent<Env> {
         // MCP tools from connected servers
         ...mcpTools,
 
+        // #region save tool
+        // This is an all purpose saving tool for sql databases
+        saveData: tool({
+          description: "A universal tool to save information to the database. Use this to save new recipes OR physical addresses/locations.",
+          inputSchema: z.object({
+            type: z.enum(["recipe", "location"]).describe("What type of data are you saving?"),
+            name: z.string().describe("The name of the recipe or location (e.g., 'Moms House', 'Chili Con Carne')"),
+            
+            // Location Specific Field
+            address: z.string().optional().describe("The full address (REQUIRED if type is 'location')"),
+            
+            // Recipe Specific Fields
+            meal_type: z.enum(["breakfast", "lunch", "dinner", "snack", "dessert"]).optional(),
+            rating: z.number().optional(),
+            difficulty: z.number().optional(),
+            prep_time: z.number().optional(),
+            calories: z.number().optional(),
+            protein: z.number().optional(),
+            ingredients: z.string().optional().describe("Comma-separated string of ingredients"),
+            instructions: z.string().optional()
+          }),
+          execute: async (input) => await saveDataExec(this, input)
+        }),
+
+        //#region update tool
+        // this is an all purpose update tool for sql databases
+        updateData: tool({
+          description: "A universal tool to update existing information in the database. Use this to modify saved recipes or update physical addresses.",
+          inputSchema: z.object({
+            type: z.enum(["recipe", "location", "shopping_list", "inventory"]).describe("What type of data are you updating?"),
+            name: z.string().describe("The exact name of the recipe or location to update (e.g., 'home', 'Chili Con Carne')"),
+            
+            // Location Specific Field
+            address: z.string().optional().describe("The new full address (REQUIRED if type is 'location')"),
+            
+            // Shopping List Specific
+            action: z.enum(["add", "remove", "clear"]).optional().describe("REQUIRED if type is 'shopping_list'"),
+            items: z.string().optional().describe("Comma-seperated items to add or remove from the shopping list"),
+
+            // Inventory specific
+            inventory_data: z.string().optional().describe("REQUIRED if type is 'inventory'. Must be formatted exactly as 'item|quantity|unit|category; item2|qty2|unit2|cat2'. To delete an item, pass 0 for the quantity (e.g. 'Milk|0|L|Dairy')"),
+
+            // Recipe Specific Fields (Only provide what needs to change)
+            meal_type: z.enum(["breakfast", "lunch", "dinner", "snack", "dessert"]).optional(),
+            rating: z.number().optional(),
+            difficulty: z.number().optional(),
+            prep_time: z.number().optional(),
+            calories: z.number().optional(),
+            protein: z.number().optional(),
+            ingredients: z.string().optional().describe("Comma-separated string of ALL ingredients if they need updating"),
+            instructions: z.string().optional()
+          }),
+          execute: async (input) => await updateDataExec(this, input)
+        }),
+
+        // calculates important journes for events taking into account traffic time + 25%
+        calculateTravelTime: tool({
+          description: "Use this to calculate travel time between two locations. It handles walking, public transport, and driving. Use it when the user asks 'how long does it take to get to X' OR when calculating departure buffers for important reminders.",
+          inputSchema: z.object({
+            origin: z.string().describe("The starting address or location name"),
+            destination: z.string().describe("The final destination address or location name"),
+            mode: z.enum(["WALK", "TRANSIT", "DRIVE"]).describe("The method of transportation"),
+            arriveBy: z.string().optional().describe("The ISO datetime string of when the user needs to arrive. REQUIRED for TRANSIT mode.")
+          }),
+          execute: async (input) => await calculateSmartDepartureExec(this, input)
+        }),
+
         // recomend meals to the user
         suggestMealsBasedOnInventory: tool({
           description: "Use this FIRST when the user asks 'what should I eat', 'pick a recipe', or wants meal suggestions. It automatically cross-references their inventory with their recipes and returns the best matches. DO NOT call checkInventory and getRecipeBank manually for this.",
@@ -165,16 +254,6 @@ export class ChatAgent extends AIChatAgent<Env> {
           description: "See what is currently on the user's persistent shopping list.",
           inputSchema: z.object({}),
           execute: async () => await viewShoppingListExec(this)
-        }),
-
-        // update the shopping list
-        updateShoppingList: tool({
-          description: "Add, remove, or clear items from the user's persistent shopping list.",
-          inputSchema: z.object({
-            action: z.enum(["add", "remove", "clear"]).describe("What to do with the list"),
-            items: z.string().optional().describe("A comma-separated list of items (e.g., 'milk, eggs, bread'). Leave empty if action is 'clear'.")
-          }),
-          execute: async (input) => await updateShoppingListExec(this, input)
         }),
 
         // send that shopping list through a scheduled reminder
@@ -215,29 +294,11 @@ export class ChatAgent extends AIChatAgent<Env> {
           execute: async (input) => await scheduleReminderExec(this, input)
         }),
 
-        // update inventory
-        updateInventory: tool({
-          description: "Update pantry/fridge.",
-          inputSchema: z.object({ inventory_data: z.string() }),
-          execute: async (input) => await updateInventoryExec(this, input)
-        }),
-
         // check inventory
         checkInventory: tool({
           description: "Check available ingredients.",
           inputSchema: z.object({}),
           execute: async () => await checkInventoryExec(this)
-        }),
-
-        // save a new recipe. Determines if it's my favorite or in rotation at the current point in time.
-        saveRecipe: tool({
-          description: "Save or update a recipe.",
-          inputSchema: z.object({
-            name: z.string(), rating: z.number(), difficulty: z.number(),
-            prep_time: z.number(), calories: z.number(), protein: z.number(),
-            ingredients: z.string(), instructions: z.string()
-          }),
-          execute: async (input) => await saveRecipeExec(this, input)
         }),
 
         // query the recipe database

@@ -245,6 +245,138 @@ function ToolPartView({
   return null;
 }
 
+// ── Form Interaction ────────────────────────────────────────────────────
+
+function AddRecipeModal({ 
+  isOpen, 
+  onClose, 
+  onSubmit 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onSubmit: (formattedText: string) => void; 
+}) {
+  const [name, setName] = useState("");
+  const [rating, setRating] = useState(3);
+  const [difficulty, setDifficulty] = useState(3);
+  const [prepTime, setPrepTime] = useState(30);
+  const [calories, setCalories] = useState<number | "">("");
+  const [protein, setProtein] = useState<number | "">("");
+  const [ingredients, setIngredients] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [mealType, setMealType] = useState("dinner");
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // A softer, more conversational prompt helps prevent Cloudflare 1031 errors
+    // because it relies on the model's natural language processing rather than strict command parsing.
+    const promptText = `I have a new recipe I'd like to save to my bank. 
+
+**Name:** ${name}
+**Meal Type:** ${mealType}
+**Rating:** ${rating}/5
+**Difficulty:** ${difficulty}/5
+**Prep time:** ${prepTime} mins
+**Macros:** ${calories || 0} calories, ${protein || 0}g protein
+**Ingredients:** ${ingredients}
+
+**Instructions:** 
+${instructions}
+
+Please save this for me!`;
+
+    onSubmit(promptText);
+    
+    // Reset form
+    setName(""); setMealType(""); setCalories(""); setProtein(""); setIngredients(""); setInstructions("");
+    onClose();
+  };
+
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-kumo-elevated/80 backdrop-blur-sm p-4">
+      <div className="bg-kumo-base w-full max-w-lg rounded-xl shadow-2xl border border-kumo-line flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-4 border-b border-kumo-line shrink-0">
+          <h2 className="text-lg font-bold text-kumo-default">📖 Add New Recipe</h2>
+          <button onClick={onClose} className="p-1 hover:bg-kumo-control rounded">
+            <XIcon size={16} />
+          </button>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="p-4 overflow-y-auto space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Recipe Name</label>
+            <input required type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 rounded-lg border border-kumo-line bg-kumo-control" placeholder="e.g., Spicy Basil Chicken" />
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-[2]">
+              <label className="block text-sm font-medium mb-1">Recipe Name</label>
+              <input required type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 rounded-lg border border-kumo-line bg-kumo-control" placeholder="e.g., Spicy Basil Chicken" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">Meal Type</label>
+              <select value={mealType} onChange={e => setMealType(e.target.value)} className="w-full p-2 rounded-lg border border-kumo-line bg-kumo-control">
+                <option value="breakfast">Breakfast</option>
+                <option value="lunch">Lunch</option>
+                <option value="dinner">Dinner</option>
+                <option value="snack">Snack</option>
+                <option value="dessert">Dessert</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">Rating</label>
+              <input type="range" min="1" max="5" value={rating} onChange={e => setRating(parseInt(e.target.value))} className="w-full" />
+              <div className="text-center text-xs text-kumo-subtle">{rating} Stars</div>
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">Difficulty</label>
+              <input type="range" min="1" max="5" value={difficulty} onChange={e => setDifficulty(parseInt(e.target.value))} className="w-full" />
+              <div className="text-center text-xs text-kumo-subtle">Level {difficulty}</div>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">Time (mins)</label>
+              <input required type="number" min="1" value={prepTime} onChange={e => setPrepTime(parseInt(e.target.value))} className="w-full p-2 rounded-lg border border-kumo-line bg-kumo-control" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">Calories</label>
+              <input required type="number" min="0" value={calories} onChange={e => setCalories(parseInt(e.target.value) || "")} className="w-full p-2 rounded-lg border border-kumo-line bg-kumo-control" placeholder="e.g., 600" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">Protein (g)</label>
+              <input required type="number" min="0" value={protein} onChange={e => setProtein(parseInt(e.target.value) || "")} className="w-full p-2 rounded-lg border border-kumo-line bg-kumo-control" placeholder="e.g., 45" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Ingredients (comma separated)</label>
+            <textarea required value={ingredients} onChange={e => setIngredients(e.target.value)} rows={2} className="w-full p-2 rounded-lg border border-kumo-line bg-kumo-control resize-none" placeholder="2 chicken breasts, soy sauce, basil..." />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Instructions</label>
+            <textarea required value={instructions} onChange={e => setInstructions(e.target.value)} rows={3} className="w-full p-2 rounded-lg border border-kumo-line bg-kumo-control resize-none" placeholder="1. Cut chicken... 2. Fry..." />
+          </div>
+
+          <div className="pt-2 shrink-0">
+            <button type="submit" className="w-full bg-kumo-brand text-white py-2 rounded-lg font-medium hover:bg-kumo-brand/90 transition-colors">
+              Draft in Chat
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Main chat ─────────────────────────────────────────────────────────
 
 function Chat() {
@@ -253,6 +385,7 @@ function Chat() {
   const [showDebug, setShowDebug] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [showRecipeModal, setShowRecipeModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -504,6 +637,14 @@ function Chat() {
               />
             </div>
             <ThemeToggle />
+            {/* NEW ADD RECIPE BUTTON */}
+            <Button
+              variant="primary"
+              icon={<PlusIcon size={16} />}
+              onClick={() => setShowRecipeModal(true)}
+            >
+              Add Recipe
+            </Button>
             <div className="relative" ref={mcpPanelRef}>
               <Button
                 variant="secondary"
@@ -679,6 +820,18 @@ function Chat() {
           </div>
         </div>
       </header>
+
+      {/* NEW RECIPE MODAL */}
+      <AddRecipeModal 
+        isOpen={showRecipeModal} 
+        onClose={() => setShowRecipeModal(false)} 
+        onSubmit={(formattedText) => {
+          sendMessage({
+            role: "user",
+            parts: [{ type: "text", text: formattedText }]
+          });
+        }} 
+      />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">

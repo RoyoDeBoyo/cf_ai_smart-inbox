@@ -29,6 +29,7 @@ export async function getRecipeInfoExec(agent: any, name: string) {
   
   return `Details for ${data.name}:
   - Rating: ${data.rating}/5
+  - Meal type: ${data.meal_type}
   - Difficulty: ${data.difficulty}
   - Prep Time: ${data.prep_time} mins
   - Calories: ${data.calories} | Protein: ${data.protein}g
@@ -45,6 +46,7 @@ export async function getCompleteRecipeListExec(agent: any) {
   for (const r of recipes) {
     const ingredients = JSON.parse(r.ingredients_json).join(", ");
     output += `**${r.name}** (${r.rating}/5 stars)\n`;
+    output += `- 🍽️ Meal type: ${r.meal_type}\n`;
     output += `- ⏱️ ${r.prep_time} mins | 💪 ${r.protein}g protein\n`;
     output += `- 🛒 Ingredients: ${ingredients}\n`;
     output += `- 📝 Instructions: ${r.instructions}\n\n---\n\n`;
@@ -54,27 +56,44 @@ export async function getCompleteRecipeListExec(agent: any) {
   return output;
 }
 
-export async function saveRecipeExec(agent: any, rawInput: any) {
-  const recipe = sanitizeAIPayload(rawInput);
-  const timestamp = new Date().toISOString();
-  const ingredientsArray = recipe.ingredients.split(',').map((i: string) => i.trim());
+// updates an already existing entry, keeping the db only as large as it has to be
+export async function updateRecipeExec(agent: any, input: any) {
+  const { name, rating, difficulty, prep_time, calories, protein, meal_type, ingredients, instructions } = input;
   
+  // 1. Check if the recipe exists
   const existing = agent.ctx.storage.sql.exec(
-    `SELECT id FROM recipes WHERE name = ? COLLATE NOCASE`, recipe.name
+    `SELECT * FROM recipes WHERE name = ? COLLATE NOCASE`, 
+    name.trim()
   ).toArray();
 
-  if (existing.length > 0) {
-    agent.ctx.storage.sql.exec(
-      `UPDATE recipes SET rating=?, difficulty=?, prep_time=?, calories=?, protein=?, ingredients_json=?, instructions=?, last_updated=? WHERE id=?`,
-      recipe.rating, recipe.difficulty, recipe.prep_time, recipe.calories, recipe.protein, JSON.stringify(ingredientsArray), recipe.instructions, timestamp, existing[0].id
-    );
-    return `Updated '${recipe.name}'.`;
-  } else {
-    agent.ctx.storage.sql.exec(
-      `INSERT INTO recipes (id, name, difficulty, prep_time, rating, calories, protein, ingredients_json, instructions, last_updated) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      crypto.randomUUID(), recipe.name, recipe.difficulty, recipe.prep_time, recipe.rating, recipe.calories, recipe.protein, JSON.stringify(ingredientsArray), recipe.instructions, timestamp
-    );
-    return `Saved new recipe '${recipe.name}'.`;
+  if (existing.length === 0) return `Recipe '${name}' not found in the database.`;
+
+  // 2. Dynamically build the SQL update query based on what was provided
+  const updates = [];
+  const params = [];
+
+  if (rating !== undefined) { updates.push("rating = ?"); params.push(rating); }
+  if (difficulty !== undefined) { updates.push("difficulty = ?"); params.push(difficulty); }
+  if (prep_time !== undefined) { updates.push("prep_time = ?"); params.push(prep_time); }
+  if (calories !== undefined) { updates.push("calories = ?"); params.push(calories); }
+  if (protein !== undefined) { updates.push("protein = ?"); params.push(protein); }
+  if (meal_type !== undefined) { updates.push("meal_type = ?"); params.push(meal_type.toLowerCase()); }
+  if (ingredients !== undefined) { 
+    updates.push("ingredients_json = ?"); 
+    params.push(JSON.stringify(ingredients.split(',').map((s: string) => s.trim()))); 
+  }
+  if (instructions !== undefined) { updates.push("instructions = ?"); params.push(instructions); }
+
+  if (updates.length === 0) return "No fields were provided to update.";
+
+  // 3. Execute the dynamic query
+  params.push(name.trim()); // The WHERE clause parameter
+  const query = `UPDATE recipes SET ${updates.join(", ")} WHERE name = ? COLLATE NOCASE`;
+  
+  try {
+    agent.ctx.storage.sql.exec(query, ...params);
+    return `Successfully updated the following fields for ${name}: ${updates.map(u => u.split(' =')[0]).join(', ')}.`;
+  } catch (error) {
+    return `Failed to update recipe: ${error}`;
   }
 }
