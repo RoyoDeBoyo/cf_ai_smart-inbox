@@ -15,6 +15,7 @@ This is an AI agent built on Cloudflare's Workers and Agents platform that can u
 - **Intelligent Suggestions**: Recommends easy-to-cook meals when you've been busy; adapts recommendations based on how much you like each meal
 - **Portfolio Tracking**: Check your Trading 212 stock holdings and combined dividend yields
 - **Natural Language**: Understands complex requests and maintains context across conversations
+- **Consolidated Data Fetching**: Unified `getData` tool efficiently handles all database queries (inventory, recipes, reminders, shopping lists, and meal suggestions)
 
 ## Tech Stack
 
@@ -192,6 +193,7 @@ gentle-river-8064/
 │       ├── recipes.ts       # Recipe management
 │       ├── reminders.ts     # Reminder scheduling
 │       ├── shopping.ts      # Shopping list management
+│       ├── storage.ts       # Unified data fetching 
 │       ├── t212.ts          # Trading 212 integration
 │       └── utils.ts         # Utility functions
 ├── public/                  # Static assets
@@ -200,6 +202,14 @@ gentle-river-8064/
 ├── tsconfig.json            # TypeScript config
 └── package.json             # Dependencies and scripts
 ```
+
+### Tool Architecture
+
+The project uses a unified data-fetching pattern:
+- **getDataExec** (storage.ts): Consolidated function handling inventory checks, recipe queries, reminder lists, shopping lists, and meal suggestions
+- **saveDataExec** (storage.ts): Saves new recipes and locations
+- **updateDataExec** (storage.ts): Updates existing recipes, locations, shopping lists, and inventory
+- **Specialized tools**: Remaining tool files handle specific operations (reminders scheduling, Discord webhooks, etc.)
 
 ## Deployment
 
@@ -219,6 +229,7 @@ This project uses Cloudflare's **Agents** framework, which provides:
 - **Workers AI**: Serverless GPU-powered inference for the Google Gemma 4 model
 - **WebSocket Communication**: Real-time bidirectional communication between client and agent
 - **Persistent State**: SQLite database within each Durable Object instance
+- **Consolidated Data Operations**: All read operations for inventory, recipes, reminders, and shopping lists are unified through a single `getData` tool to optimize token usage and improve response times
 
 For more information on Cloudflare Agents, visit: https://developers.cloudflare.com/agents/
 

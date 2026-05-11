@@ -15,24 +15,15 @@ import { z } from "zod";
 // Tool imports from src/tools
 import { fetchT212Portfolio } from "./tools/t212";
 import { sendDiscordReminder } from "./tools/discord";
-import { listRemindersExec, cancelReminderExec, scheduleReminderExec } from "./tools/reminders";
-import { checkInventoryExec } from "./tools/inventory";
+import { scheduleReminderExec } from "./tools/reminders";
 import { calculateSmartDepartureExec } from "./tools/maps";
+import { sendShoppingListExec } from "./tools/shopping";
 import { 
   saveDataExec,
-  updateDataExec
+  updateDataExec,
+  getDataExec,
+  deleteDataExec
 } from "./tools/storage";
-import {  
-  getRecipeBankExec, 
-  getCompleteRecipeListExec, 
-  getRecipeInfoExec, 
-  getRecipeNamesExec,
-} from "./tools/recipes";
-import { 
-  viewShoppingListExec, 
-  sendShoppingListExec,
-  suggestMealsByInventoryExec
-} from "./tools/shopping";
 
 /**
  * The AI SDK's downloadAssets step runs `new URL(data)` on every file
@@ -145,15 +136,15 @@ export class ChatAgent extends AIChatAgent<Env> {
       CRITICAL: You must call tools IMMEDIATELY. Do NOT output any "thinking", reasoning, or preliminary text before a tool call. Just output the tool call.
       
       MEAL PLANNING RULES:
-      - When asked for meal ideas, ALWAYS use 'checkInventory' to see what the user has, and 'getRecipeBank' to see their recipes.
+      - When asked for meal ideas, ALWAYS use 'getData' with type 'meal_suggestions' to get personalized meal recommendations based on inventory.
       - WEIGHTING SYSTEM: 
         1. Prioritize recipes with a high 'rating' (4 or 5).
         2. If the user says they are tired, busy, or stressed, filter for a 'difficulty' of 1 or 2, and a short 'prep_time'.
-      - DYNAMIC TASTES: If the user says they are sick of a meal, bored of it, or didn't like it this time, use 'saveRecipe' to downgrade its rating to a 2 or 3. If they absolutely loved it, upgrade it to a 5.
+      - DYNAMIC TASTES: If the user says they are sick of a meal, bored of it, or didn't like it this time, use 'updateData' to downgrade its rating to a 2 or 3. If they absolutely loved it, upgrade it to a 5.
       - If the user is lacking ingredients for a suggested meal, ask them if they want to add those missing items to a shopping list.
       - If they agree, use 'scheduleReminder' to schedule a Discord message with the missing ingredients in the 'shopping_list' array.
       - If the user says they are "going shopping now", use 'sendShoppingList' to instantly dispatch the list to their Discord.
-      - If they want to be *reminded* to go shopping at a later date/time, use 'viewShoppingList' to get the current items, and then put those items into a 'scheduleReminder' tool call.
+      - If they want to be *reminded* to go shopping at a later date/time, use 'getData' with type 'shopping_list' to get the current items, and then put those items into a 'scheduleReminder' tool call.
       - POST-SHOPPING CORRECTIONS: When the user goes shopping, the system automatically adds all items to their inventory. If the user returns and says the store did NOT have an item (e.g., "they were out of carrots"), you must call TWO tools:
       REMINDER RULES:
         - If a user asks to set an "important" reminder for an event they must travel to, do NOT schedule the reminder immediately.
@@ -243,17 +234,13 @@ export class ChatAgent extends AIChatAgent<Env> {
         }),
 
         // recomend meals to the user
-        suggestMealsBasedOnInventory: tool({
-          description: "Use this FIRST when the user asks 'what should I eat', 'pick a recipe', or wants meal suggestions. It automatically cross-references their inventory with their recipes and returns the best matches. DO NOT call checkInventory and getRecipeBank manually for this.",
-          inputSchema: z.object({}),
-          execute: async () => await suggestMealsByInventoryExec(this)
-        }),
-
-        // view what is currently on the shopping list
-        viewShoppingList: tool({
-          description: "See what is currently on the user's persistent shopping list.",
-          inputSchema: z.object({}),
-          execute: async () => await viewShoppingListExec(this)
+        getData: tool({
+          description: "A universal tool to fetch data from the database. Use this to retrieve shopping lists, inventory, reminders, recipes, and meal suggestions.",
+          inputSchema: z.object({
+            type: z.enum(["shopping_list", "reminders", "inventory", "recipe_bank", "recipe_names", "recipe_info", "recipe_complete_list", "meal_suggestions"]).describe("What type of data do you want to retrieve?"),
+            name: z.string().optional().describe("Required only if type is 'recipe_info'. The exact name of the recipe to look up.")
+          }),
+          execute: async (input) => await getDataExec(this, input)
         }),
 
         // send that shopping list through a scheduled reminder
@@ -270,18 +257,14 @@ export class ChatAgent extends AIChatAgent<Env> {
           execute: async () => await fetchT212Portfolio(this.env.T212_API_KEY, this.env.T212_API_SECRET)
         }),
 
-        // View all active reminders
-        listReminders: tool({
-          description: "List active reminders.",
-          inputSchema: z.object({}),
-          execute: async () => await listRemindersExec(this)
-        }),
-
-        // Cancel a specific reminder
-        cancelReminder: tool({
-          description: "Cancel a reminder by ID.",
-          inputSchema: z.object({ id: z.string() }),
-          execute: async ({ id }) => await cancelReminderExec(this, id)
+        // Delete data from database
+        deleteData: tool({
+          description: "A universal tool to delete data from the database. Use this to delete reminders, recipes, locations, or inventory items.",
+          inputSchema: z.object({
+            type: z.enum(["reminder", "recipe", "location", "inventory"]).describe("What type of data do you want to delete?"),
+            id: z.string().describe("The ID, name, or identifier of the item to delete. For reminders, use the reminder ID. For recipes/locations/inventory, use the name.")
+          }),
+          execute: async (input) => await deleteDataExec(this, input)
         }),
 
         // Schedule a new discord message
@@ -292,43 +275,6 @@ export class ChatAgent extends AIChatAgent<Env> {
             discord_message: z.string(), shopping_list: z.string().optional()
           }),
           execute: async (input) => await scheduleReminderExec(this, input)
-        }),
-
-        // check inventory
-        checkInventory: tool({
-          description: "Check available ingredients.",
-          inputSchema: z.object({}),
-          execute: async () => await checkInventoryExec(this)
-        }),
-
-        // query the recipe database
-        getRecipeBank: tool({
-          description: "Fetch saved recipes. WARNING: High token cost. Do not use this to search for meal ideas, only use this if the user explicity asks to.",
-          inputSchema: z.object({}),
-          execute: async () => await getRecipeBankExec(this)
-        }),
-
-        // only gets names
-        getRecipeNames: tool({
-          description: "Get a simple list of all saved recipe names.",
-          inputSchema: z.object({}),
-          execute: async () => await getRecipeNamesExec(this)
-        }),
-
-        // gets info about ONE recipe
-        getRecipeInfo: tool({
-          description: "Get full ingredients and instructions for a specific recipe by name.",
-          inputSchema: z.object({
-            name: z.string().describe("The exact name of the recipe to look up")
-          }),
-          execute: async ({ name }) => await getRecipeInfoExec(this, name)
-        }),
-
-        // returns the complete db
-        getCompleteRecipeList: tool({
-          description: "Retrieve a formatted master list of every recipe. CRITICAL: After calling this tool, the data will be shown to the user automatically. You MUST reply to the user with ONLY the word 'Done.' Do not add any other text, reasoning, or formatting.",
-          inputSchema: z.object({}),
-          execute: async () => await getCompleteRecipeListExec(this)
         }),
 
         // Server-side tool: runs automatically on the server

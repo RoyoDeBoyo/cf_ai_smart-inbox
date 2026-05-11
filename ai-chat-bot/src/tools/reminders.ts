@@ -1,20 +1,5 @@
 import { sanitizeAIPayload } from "./utils";
 
-export async function listRemindersExec(agent: any) {
-  const tasks = agent.getSchedules(); 
-  if (tasks.length === 0) return "No active reminders.";
-  return JSON.stringify(tasks, null, 2);
-}
-
-export async function cancelReminderExec(agent: any, id: string) {
-  try {
-    agent.cancelSchedule(id); 
-    return `Successfully cancelled the reminder with ID: ${id}.`;
-  } catch (error) {
-    return `Error: Could not cancel reminder ${id}.`;
-  }
-}
-
 export async function scheduleReminderExec(agent: any, rawInput: any) {
   const cleanInput = sanitizeAIPayload(rawInput);
   const { summary, timestamp, discord_message, shopping_list } = cleanInput;
