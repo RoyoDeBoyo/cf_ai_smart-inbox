@@ -1,41 +1,47 @@
-# Cloudflare Workers
-
-STOP. Your knowledge of Cloudflare Workers APIs and limits may be outdated. Always retrieve current documentation before any Workers, KV, R2, D1, Durable Objects, Queues, Vectorize, AI, or Agents SDK task.
-
-## Docs
-
-- https://developers.cloudflare.com/workers/
-- MCP: `https://docs.mcp.cloudflare.com/mcp`
-
-For all limits and quotas, retrieve from the product's `/platform/limits/` page. eg. `/workers/platform/limits`
+# cf_ai_smart-inbox — agents reference
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `npx wrangler dev` | Local development |
-| `npx wrangler deploy` | Deploy to Cloudflare |
-| `npx wrangler types` | Generate TypeScript types |
+| `npm run dev` | Start Vite dev server (localhost:5173) |
+| `npm run deploy` | `vite build && wrangler deploy` |
+| `npm run types` | `wrangler types env.d.ts --include-runtime false` |
+| `npm run format` | `oxfmt --write .` |
+| `npm run lint` | `oxlint src/` |
+| `npm run check` | `oxfmt --check . && oxlint src/ && tsc` |
 
-Run `wrangler types` after changing bindings in wrangler.jsonc.
+Run `check` before committing (runs format check → lint → typecheck in that order). CI on main/PR runs `npm install && npm run check`.
 
-## Node.js Compatibility
+## Env vars
 
-https://developers.cloudflare.com/workers/runtime-apis/nodejs/
+Copy `.dev.vars.example` to `.dev.vars` (or check `.dev.vars` for required keys):
+- `DISCORD_WEBHOOK_URL` — Discord webhook for reminders/shopping lists
+- `T212_API_KEY` / `T212_API_SECRET` — Trading 212
+- `GOOGLE_MAPS_API_KEY` — Google Routes API
 
-## Errors
+After changing bindings in `wrangler.jsonc`, run `npm run types` to regenerate `env.d.ts`.
 
-- **Error 1102** (CPU/Memory exceeded): Retrieve limits from `/workers/platform/limits/`
-- **All errors**: https://developers.cloudflare.com/workers/observability/errors/
+## Architecture
 
-## Product Docs
+- **Single Durable Object** `ChatAgent` (`src/server.ts:50`) extends `AIChatAgent` with SQLite storage.
+- **Entrypoints**: `src/server.ts` (worker), `src/client.tsx` → `src/app.tsx` (React SPA via Vite).
+- **Tools** live in `src/tools/` — all DB reads go through `getData` in `storage.ts`. Tool functions receive the agent instance as first arg.
+- **Frontend**: React 19 + Tailwind CSS v4 + Kumo UI components + Streamdown (markdown rendering).
+- **Dev server** uses `@cloudflare/vite-plugin` — workers + frontend served together.
 
-Retrieve API references and limits from:
-`/kv/` · `/r2/` · `/d1/` · `/durable-objects/` · `/queues/` · `/vectorize/` · `/workers-ai/` · `/agents/`
+## Quirks
 
-## Best Practices (conditional)
+- **No test setup exists** — no test scripts, no test framework in dependencies.
+- **Formatter**: `oxfmt` (not prettier). Trailing commas disabled, printWidth 80.
+- **Linter**: `oxlint` (not eslint). `no-explicit-any` is error. `no-unused-vars` ignores `_`-prefixed identifiers.
+- **TypeScript**: config extends `agents/tsconfig` — do not modify base config.
+- **oxlint ignores `env.d.ts`** — add new ignore patterns to `.oxlintrc.json`.
+- **Data URIs in messages**: `server.ts:34-48` converts base64 data URIs to `Uint8Array` to bypass AI SDK fetch attempts.
+- **Wrangler config** is `wrangler.jsonc` (not `wrangler.toml`). VSCode associates `.json` with `jsonc` via `.vscode/settings.json`.
 
-If the application uses Durable Objects or Workflows, refer to the relevant best practices:
+## Strict Rules
 
-- Durable Objects: https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/
-- Workflows: https://developers.cloudflare.com/workflows/build/rules-of-workflows/
+- **Never delete or alter config files without asking first**
+- When generating markdown files, never write actual API keys, only refer to the environment variable names (e.g. GOOGLE_API_KEY)
+- When using tools, you MUST wrap your JSON output in <tool_call> and </tool_call> tags, and you must strictly use the exact tool schemas provided

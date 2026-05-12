@@ -166,7 +166,6 @@ export class ChatAgent extends AIChatAgent<Env> {
         // MCP tools from connected servers
         ...mcpTools,
 
-        // #region save tool
         // This is an all purpose saving tool for sql databases
         saveData: tool({
           description: "A universal tool to save information to the database. Use this to save new recipes OR physical addresses/locations.",
@@ -190,7 +189,6 @@ export class ChatAgent extends AIChatAgent<Env> {
           execute: async (input) => await saveDataExec(this, input)
         }),
 
-        //#region update tool
         // this is an all purpose update tool for sql databases
         updateData: tool({
           description: "A universal tool to update existing information in the database. Use this to modify saved recipes or update physical addresses.",
@@ -342,3 +340,4 @@ export default {
     );
   }
 } satisfies ExportedHandler<Env>;
+

@@ -13,6 +13,7 @@ This is an AI agent built on Cloudflare's Workers and Agents platform that can u
 - **Pantry Management**: Track ingredients and automatically update inventory when meals are made or groceries purchased
 - **Shopping Lists**: Build shopping lists over time, then sync purchases back to your pantry with substitution support
 - **Intelligent Suggestions**: Recommends easy-to-cook meals when you've been busy; adapts recommendations based on how much you like each meal
+- **Travel Time Calculation**: Calculate departure times for journeys with smart buffers using Google Maps Routes API. Supports walking, driving, and public transit
 - **Portfolio Tracking**: Check your Trading 212 stock holdings and combined dividend yields
 - **Natural Language**: Understands complex requests and maintains context across conversations
 - **Consolidated Data Fetching**: Unified `getData` tool efficiently handles all database queries (inventory, recipes, reminders, shopping lists, and meal suggestions)
@@ -83,6 +84,7 @@ Edit `.dev.vars` and add:
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN
 T212_API_KEY=your_trading_212_api_key
 T212_API_SECRET=your_trading_212_api_secret
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key
 ```
 
 #### Getting Your API Keys
@@ -97,6 +99,13 @@ T212_API_SECRET=your_trading_212_api_secret
 2. Go to Account Settings
 3. Create API credentials under Developer Settings
 4. Copy your API Key and API Secret
+
+**Google Maps API Key:**
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the Routes API (Directions API)
+4. Go to Credentials and create an API key
+5. (Optional) Restrict the API key to only the Routes API for security
 
 ### 5. Generate TypeScript Types
 
@@ -141,6 +150,19 @@ I just booked a flight for paris which leaves on Friday at 8am. Can you remind m
 Add egg fried rice to my recipes. I currently really like it so it's going to get a 5/5 for enjoyment. It's a simple meal to make so 1/5 for difficulty. It takes about 15 mins to make. I need 2 eggs, 75g of jasmine/long grain rice, 1 spring onion, 2 tablespoons of soy sauce and 1 teaspoon of lao gan ma. To make it you cook the rice. Once the rice is done, start scrambling the eggs, add the rice and lao gan ma. After 30 seconds add the soy sauce and turn off the heat. Mix the rice well and then it's ready to serve.
 ```
 
+### Travel Time Calculation
+```
+How long will it take me to walk from home to the gym?
+```
+
+```
+I have a flight at 8am on Friday. Can you remind me to leave home with enough time to drive to the airport?
+```
+
+```
+What time should I leave to get to the office by 9am using public transport?
+```
+
 ### Portfolio Queries
 ```
 How is my portfolio doing?
@@ -181,7 +203,7 @@ I got beef stock instead of veg stock.
 ## Project Structure
 
 ```
-gentle-river-8064/
+ai-chat-bot/
 ├── src/
 │   ├── app.tsx              # Frontend React app
 │   ├── client.tsx           # Client-side agent interaction
@@ -189,11 +211,10 @@ gentle-river-8064/
 │   ├── styles.css           # Global styles
 │   └── tools/               # Agent tools
 │       ├── discord.ts       # Discord webhook integration
-│       ├── inventory.ts     # Pantry management
-│       ├── recipes.ts       # Recipe management
+│       ├── maps.ts          # Google Maps travel time calculation
 │       ├── reminders.ts     # Reminder scheduling
 │       ├── shopping.ts      # Shopping list management
-│       ├── storage.ts       # Unified data fetching 
+│       ├── storage.ts       # Unified data fetching (inventory, recipes, etc.)
 │       ├── t212.ts          # Trading 212 integration
 │       └── utils.ts         # Utility functions
 ├── public/                  # Static assets
@@ -209,6 +230,8 @@ The project uses a unified data-fetching pattern:
 - **getDataExec** (storage.ts): Consolidated function handling inventory checks, recipe queries, reminder lists, shopping lists, and meal suggestions
 - **saveDataExec** (storage.ts): Saves new recipes and locations
 - **updateDataExec** (storage.ts): Updates existing recipes, locations, shopping lists, and inventory
+- **deleteDataExec** (storage.ts): Removes reminders, recipes, locations, or inventory items
+- **calculateSmartDepartureExec** (maps.ts): Calculates travel time with smart buffers using Google Routes API
 - **Specialized tools**: Remaining tool files handle specific operations (reminders scheduling, Discord webhooks, etc.)
 
 ## Deployment
