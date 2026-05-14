@@ -129,7 +129,7 @@ export class ChatAgent extends AIChatAgent<Env> {
     const workersai = createWorkersAI({ binding: this.env.AI });
 
     const result = streamText({
-      model: workersai("@cf/google/gemma-4-26b-a4b-it", {
+      model: workersai("@cf/moonshotai/kimi-k2.6", {
         sessionAffinity: this.sessionAffinity
       }),
       system: `You are a helpful and talkative assistant. You can check the weather, run calculations, schedule reminders, check stocks, act as a master meal planner, and plan journeys.
